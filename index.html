@@ -550,9 +550,11 @@
       }
       if (score > best.score) best = { score, pos: start };
     }
-    const minScore = Math.max(1, Math.ceil(recognizedWordsNorm.length * 0.34));
+    const minScore = Math.max(3, Math.ceil(recognizedWordsNorm.length * 0.5));
+    const MAX_JUMP_WORDS = 30; // caps how far a single match can move the position, so a stray false-positive match can't skip whole lines
     if (best.score >= minScore) {
-      const newIndex = Math.min(best.pos + recognizedWordsNorm.length - 1, scriptWordsMeta.length - 1);
+      const rawIndex = Math.min(best.pos + recognizedWordsNorm.length - 1, scriptWordsMeta.length - 1);
+      const newIndex = Math.min(rawIndex, currentIndex + MAX_JUMP_WORDS);
       if (newIndex >= currentIndex - 3) {
         currentIndex = newIndex;
         setTargetToIndex(currentIndex);
@@ -565,7 +567,7 @@
     if (!res) return;
     const text = res[0].transcript || "";
     const words = text.trim().split(/\s+/).map(normalizeWord).filter(Boolean);
-    const windowWords = words.slice(-6);
+    const windowWords = words.slice(-8);
     if (windowWords.length > 0) matchAndScroll(windowWords);
   }
 
