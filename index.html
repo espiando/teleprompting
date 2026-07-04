@@ -1,0 +1,835 @@
+<!DOCTYPE html>
+<!--
+  Teleprompter de página única (sem backend, sem frameworks, sem dependências externas).
+
+  IMPORTANTE: microfone e reconhecimento de fala só funcionam em contexto seguro
+  (HTTPS ou localhost). Para testar localmente:
+    - `npx serve .` e abrir http://localhost:3000 (ou a porta indicada)
+    - ou publicar a pasta no GitHub Pages
+  Abrir o arquivo direto como file:// não vai pedir permissão de microfone em
+  alguns navegadores (principalmente iOS Safari).
+-->
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+<title>Teleprompter</title>
+<style>
+  :root {
+    --band-ratio: 0.42;
+  }
+  * { box-sizing: border-box; }
+  html, body {
+    margin: 0; padding: 0; height: 100%;
+    background: #111; color: #eee;
+    font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    overscroll-behavior: none;
+  }
+
+  /* ---------- EDIT SCREEN ---------- */
+  #editScreen {
+    min-height: 100vh;
+    padding: 20px 16px 40px;
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+  }
+  #editScreen h1 {
+    font-size: 20px;
+    margin: 0 0 4px;
+  }
+  #scriptInput {
+    width: 100%;
+    min-height: 30vh;
+    resize: vertical;
+    background: #1c1c1c;
+    color: #fff;
+    border: 1px solid #444;
+    border-radius: 8px;
+    padding: 10px;
+    font-size: 15px;
+    line-height: 1.4;
+  }
+  .control-row {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    font-size: 14px;
+  }
+  .control-row label { display: flex; justify-content: space-between; }
+  .control-row input[type="range"] { width: 100%; }
+  .preview-wrap {
+    background: #000;
+    border-radius: 8px;
+    padding: 16px 8px;
+    min-height: 90px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    overflow: hidden;
+  }
+  #previewText {
+    color: #fff;
+    text-align: center;
+    word-break: break-word;
+    transition: transform 0.15s ease;
+  }
+  #startBtn {
+    margin-top: 6px;
+    padding: 14px;
+    font-size: 18px;
+    font-weight: 600;
+    background: #2e7d32;
+    color: #fff;
+    border: none;
+    border-radius: 10px;
+  }
+  #startBtn:active { background: #256428; }
+
+  /* ---------- READ SCREEN ---------- */
+  #readScreen {
+    position: fixed;
+    inset: 0;
+    background: #000;
+    color: #fff;
+    overflow: hidden;
+  }
+  #readScreen[hidden] { display: none; }
+
+  .scroll-container {
+    position: absolute;
+    inset: 0;
+    overflow-y: scroll;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: none;
+  }
+  .scroll-container::-webkit-scrollbar { display: none; }
+
+  .script-text {
+    text-align: center;
+    color: #fff;
+    line-height: 1.6;
+    font-weight: 600;
+    padding-top: 60vh;
+    padding-bottom: 60vh;
+  }
+  .script-text.mirrored { transform: scaleX(-1); }
+  .script-text p { margin: 0 0 0.7em; }
+  .word { display: inline; }
+
+  .reading-band {
+    position: absolute;
+    left: 0; right: 0;
+    top: calc(var(--band-ratio) * 100%);
+    height: 2px;
+    background: rgba(255,255,255,0.35);
+    box-shadow: 0 0 10px rgba(255,255,255,0.25);
+    pointer-events: none;
+  }
+
+  .rc {
+    position: absolute;
+    opacity: 0.35;
+    background: rgba(255,255,255,0.12);
+    color: #fff;
+    border: none;
+    border-radius: 50%;
+    width: 42px;
+    height: 42px;
+    font-size: 18px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    user-select: none;
+    -webkit-tap-highlight-color: transparent;
+  }
+  .rc:active { opacity: 0.8; }
+  #exitBtn { top: 3%; left: 3%; }
+  #modeIndicator {
+    top: 3%; right: 3%;
+    width: auto; height: auto;
+    border-radius: 16px;
+    padding: 6px 10px;
+    font-size: 11px;
+    white-space: nowrap;
+  }
+  .bottom-bar {
+    position: absolute;
+    bottom: 3%;
+    left: 0; right: 0;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 0 3%;
+  }
+  .bottom-bar .rc { position: static; }
+  .speed-group { display: flex; gap: 8px; }
+
+  /* ---------- MODALS ---------- */
+  .modal {
+    position: fixed;
+    inset: 0;
+    background: rgba(0,0,0,0.75);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 50;
+    padding: 20px;
+  }
+  .modal[hidden] { display: none; }
+  .modal-box {
+    background: #1c1c1c;
+    border-radius: 10px;
+    padding: 20px;
+    max-width: 420px;
+    width: 100%;
+    color: #eee;
+  }
+  .modal-box textarea {
+    width: 100%;
+    background: #111;
+    color: #fff;
+    border: 1px solid #444;
+    border-radius: 6px;
+    padding: 8px;
+    font-size: 14px;
+  }
+  .modal-box button {
+    padding: 10px 16px;
+    border-radius: 8px;
+    border: none;
+    font-size: 15px;
+    margin-top: 10px;
+  }
+  #micAllowBtn { background: #2e7d32; color: #fff; width: 100%; }
+  .modal-actions { display: flex; gap: 10px; }
+  .modal-actions button { flex: 1; }
+  #jumpGoBtn { background: #2e7d32; color: #fff; }
+  #jumpCancelBtn { background: #444; color: #fff; }
+  .error-text { color: #ff8a80; font-size: 13px; }
+</style>
+</head>
+<body>
+
+<!-- ================= EDIT SCREEN ================= -->
+<div id="editScreen">
+  <h1>Teleprompter</h1>
+
+  <textarea id="scriptInput" placeholder="Cole aqui o script do vídeo (em inglês)..."></textarea>
+
+  <div class="control-row">
+    <label>Tamanho da fonte <span id="fontSizeValue"></span>px</label>
+    <input type="range" id="fontSizeSlider" min="16" max="72" value="32">
+  </div>
+
+  <div class="control-row">
+    <label>Margem lateral <span id="marginValue"></span>%</label>
+    <input type="range" id="marginSlider" min="0" max="40" value="8">
+  </div>
+
+  <div class="control-row">
+    <label style="justify-content:flex-start; gap:8px;">
+      <input type="checkbox" id="mirrorToggle" style="width:auto;">
+      Modo espelhado
+    </label>
+  </div>
+
+  <div class="preview-wrap">
+    <div id="previewText"></div>
+  </div>
+
+  <button id="startBtn">Iniciar ▶</button>
+</div>
+
+<!-- ================= READ SCREEN ================= -->
+<div id="readScreen" hidden>
+  <div class="scroll-container" id="scrollContainer">
+    <div class="script-text" id="scriptText"></div>
+  </div>
+  <div class="reading-band"></div>
+
+  <button class="rc" id="exitBtn" title="Sair">✕</button>
+  <div class="rc" id="modeIndicator">…</div>
+
+  <div class="bottom-bar">
+    <button class="rc" id="restartBtn" title="Reiniciar do topo">⟲</button>
+    <div class="speed-group">
+      <button class="rc" id="speedMinusBtn" title="Diminuir velocidade (modo volume)">−</button>
+      <button class="rc" id="playPauseBtn" title="Pausar/Retomar">⏸</button>
+      <button class="rc" id="speedPlusBtn" title="Aumentar velocidade (modo volume)">+</button>
+    </div>
+    <button class="rc" id="jumpBtn" title="Jump to">➜</button>
+  </div>
+</div>
+
+<!-- ================= MIC PERMISSION MODAL ================= -->
+<div class="modal" id="micModal" hidden>
+  <div class="modal-box">
+    <p>Precisamos de acesso ao microfone para o teleprompter acompanhar sua fala automaticamente (ou detectar o volume da voz, caso o reconhecimento de fala não esteja disponível).</p>
+    <button id="micAllowBtn">Permitir microfone</button>
+    <p class="error-text" id="micError" hidden></p>
+  </div>
+</div>
+
+<!-- ================= JUMP TO MODAL ================= -->
+<div class="modal" id="jumpModal" hidden>
+  <div class="modal-box">
+    <p>Cole um trecho do script para pular até ele:</p>
+    <textarea id="jumpInput" rows="3"></textarea>
+    <div class="modal-actions">
+      <button id="jumpGoBtn">Ir</button>
+      <button id="jumpCancelBtn">Cancelar</button>
+    </div>
+  </div>
+</div>
+
+<script>
+(function () {
+  "use strict";
+
+  // ---------------------------------------------------------------
+  // State + persistence
+  // ---------------------------------------------------------------
+  const LS_KEY = "teleprompter_state_v1";
+  const state = {
+    scriptText: "",
+    fontSize: 32,
+    marginPercent: 8,
+    mirror: false,
+    wpm: 140
+  };
+
+  function loadState() {
+    try {
+      const raw = localStorage.getItem(LS_KEY);
+      if (raw) Object.assign(state, JSON.parse(raw));
+    } catch (e) { /* ignore corrupt storage */ }
+  }
+  function saveState() {
+    try { localStorage.setItem(LS_KEY, JSON.stringify(state)); } catch (e) { /* storage full/unavailable */ }
+  }
+
+  // ---------------------------------------------------------------
+  // DOM refs
+  // ---------------------------------------------------------------
+  const editScreen = document.getElementById("editScreen");
+  const readScreen = document.getElementById("readScreen");
+  const scriptInput = document.getElementById("scriptInput");
+  const fontSizeSlider = document.getElementById("fontSizeSlider");
+  const fontSizeValue = document.getElementById("fontSizeValue");
+  const marginSlider = document.getElementById("marginSlider");
+  const marginValue = document.getElementById("marginValue");
+  const mirrorToggle = document.getElementById("mirrorToggle");
+  const previewText = document.getElementById("previewText");
+  const startBtn = document.getElementById("startBtn");
+
+  const scrollContainerEl = document.getElementById("scrollContainer");
+  const scriptTextEl = document.getElementById("scriptText");
+  const modeIndicatorEl = document.getElementById("modeIndicator");
+  const exitBtn = document.getElementById("exitBtn");
+  const restartBtn = document.getElementById("restartBtn");
+  const playPauseBtn = document.getElementById("playPauseBtn");
+  const speedMinusBtn = document.getElementById("speedMinusBtn");
+  const speedPlusBtn = document.getElementById("speedPlusBtn");
+  const jumpBtn = document.getElementById("jumpBtn");
+
+  const micModal = document.getElementById("micModal");
+  const micAllowBtn = document.getElementById("micAllowBtn");
+  const micError = document.getElementById("micError");
+
+  const jumpModal = document.getElementById("jumpModal");
+  const jumpInput = document.getElementById("jumpInput");
+  const jumpGoBtn = document.getElementById("jumpGoBtn");
+  const jumpCancelBtn = document.getElementById("jumpCancelBtn");
+
+  // ---------------------------------------------------------------
+  // Fuzzy matching helpers
+  // ---------------------------------------------------------------
+  function normalizeWord(w) {
+    return (w || "").toLowerCase().replace(/[^a-z0-9']/g, "");
+  }
+
+  function levenshtein(a, b) {
+    const al = a.length, bl = b.length;
+    if (al === 0) return bl;
+    if (bl === 0) return al;
+    const dp = new Array(bl + 1);
+    for (let j = 0; j <= bl; j++) dp[j] = j;
+    for (let i = 1; i <= al; i++) {
+      let prev = dp[0];
+      dp[0] = i;
+      for (let j = 1; j <= bl; j++) {
+        const tmp = dp[j];
+        dp[j] = Math.min(dp[j] + 1, dp[j - 1] + 1, prev + (a[i - 1] === b[j - 1] ? 0 : 1));
+        prev = tmp;
+      }
+    }
+    return dp[bl];
+  }
+
+  function wordsMatch(a, b) {
+    if (!a || !b) return false;
+    if (a === b) return true;
+    const maxLen = Math.max(a.length, b.length);
+    if (maxLen <= 2) return false;
+    return levenshtein(a, b) <= Math.max(1, Math.floor(maxLen * 0.3));
+  }
+
+  // ---------------------------------------------------------------
+  // Script rendering (word-by-word spans for scroll targeting)
+  // ---------------------------------------------------------------
+  let scriptWordsMeta = []; // [{ norm, span }]
+
+  function renderScript(text) {
+    scriptTextEl.innerHTML = "";
+    scriptWordsMeta = [];
+    let idx = 0;
+    const paragraphs = text.split(/\n+/);
+    paragraphs.forEach((para) => {
+      const p = document.createElement("p");
+      const words = para.split(/\s+/).filter((w) => w.length > 0);
+      words.forEach((w, i) => {
+        const span = document.createElement("span");
+        span.className = "word";
+        span.dataset.idx = String(idx);
+        span.textContent = w + (i < words.length - 1 ? " " : "");
+        p.appendChild(span);
+        scriptWordsMeta.push({ norm: normalizeWord(w), span });
+        idx++;
+      });
+      scriptTextEl.appendChild(p);
+    });
+  }
+
+  // ---------------------------------------------------------------
+  // Edit screen wiring
+  // ---------------------------------------------------------------
+  function applyEditStyles() {
+    fontSizeValue.textContent = state.fontSize;
+    marginValue.textContent = state.marginPercent;
+    previewText.style.fontSize = state.fontSize + "px";
+    previewText.style.paddingLeft = state.marginPercent + "%";
+    previewText.style.paddingRight = state.marginPercent + "%";
+    previewText.style.transform = state.mirror ? "scaleX(-1)" : "none";
+    const sample = (scriptInput.value || "Your script preview will appear here.").slice(0, 160);
+    previewText.textContent = sample;
+  }
+
+  function initEditScreen() {
+    scriptInput.value = state.scriptText;
+    fontSizeSlider.value = state.fontSize;
+    marginSlider.value = state.marginPercent;
+    mirrorToggle.checked = state.mirror;
+    applyEditStyles();
+  }
+
+  scriptInput.addEventListener("input", () => {
+    state.scriptText = scriptInput.value;
+    applyEditStyles();
+    saveState();
+  });
+  fontSizeSlider.addEventListener("input", () => {
+    state.fontSize = Number(fontSizeSlider.value);
+    applyEditStyles();
+    saveState();
+  });
+  marginSlider.addEventListener("input", () => {
+    state.marginPercent = Number(marginSlider.value);
+    applyEditStyles();
+    saveState();
+  });
+  mirrorToggle.addEventListener("change", () => {
+    state.mirror = mirrorToggle.checked;
+    applyEditStyles();
+    saveState();
+  });
+
+  startBtn.addEventListener("click", () => {
+    if (!scriptInput.value.trim()) {
+      alert("Cole o script antes de iniciar.");
+      return;
+    }
+    saveState();
+    micError.hidden = true;
+    micModal.hidden = false;
+  });
+
+  // ---------------------------------------------------------------
+  // Mic permission flow
+  // ---------------------------------------------------------------
+  micAllowBtn.addEventListener("click", async () => {
+    micError.hidden = true;
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      stream.getTracks().forEach((t) => t.stop()); // only needed to confirm permission
+      micModal.hidden = true;
+      enterReadScreen();
+    } catch (err) {
+      micError.textContent = "Não foi possível acessar o microfone (" + err.message + "). Verifique as permissões do navegador e tente novamente.";
+      micError.hidden = false;
+    }
+  });
+
+  // ---------------------------------------------------------------
+  // Reading screen state
+  // ---------------------------------------------------------------
+  let currentIndex = 0;
+  let mode = "speech"; // 'speech' | 'volume'
+  let usingFallback = false;
+  let paused = false;
+
+  let recognition = null;
+  let recognitionFailures = 0;
+  let lastFailureWindowStart = 0;
+
+  let audioCtx = null;
+  let analyser = null;
+  let dataArray = null;
+  let isSpeakingVolume = false;
+  let lastLoudTime = 0;
+  const VOLUME_THRESHOLD = 0.045;
+
+  let targetScrollTop = 0;
+  let rafId = null;
+  let lastFrameTime = null;
+
+  let wakeLockObj = null;
+  let videoFallbackEl = null;
+
+  const SpeechRecognitionCtor = window.SpeechRecognition || window.webkitSpeechRecognition || null;
+
+  function computeTargetScrollTopForSpan(span) {
+    const containerRect = scrollContainerEl.getBoundingClientRect();
+    const spanRect = span.getBoundingClientRect();
+    const bandY = containerRect.height * 0.42;
+    const currentScrollTop = scrollContainerEl.scrollTop;
+    const spanTopInContent = spanRect.top - containerRect.top + currentScrollTop;
+    return spanTopInContent - bandY + spanRect.height / 2;
+  }
+
+  function setTargetToIndex(idx) {
+    const meta = scriptWordsMeta[idx];
+    if (!meta) return;
+    targetScrollTop = computeTargetScrollTopForSpan(meta.span);
+  }
+
+  function scrollToIndexInstant(idx) {
+    setTargetToIndex(idx);
+    scrollContainerEl.scrollTop = targetScrollTop;
+  }
+
+  // ---- speech recognition mode ----
+  function startSpeechMode() {
+    mode = "speech";
+    modeIndicatorEl.textContent = "🎤 Reconhecimento de voz";
+    recognition = new SpeechRecognitionCtor();
+    recognition.continuous = true;
+    recognition.interimResults = true;
+    recognition.lang = "en-US";
+    recognition.onresult = handleSpeechResult;
+    recognition.onerror = handleSpeechError;
+    recognition.onend = handleSpeechEnd;
+    try {
+      recognition.start();
+    } catch (e) {
+      handleSpeechError({ error: "start-failed" });
+    }
+  }
+
+  function matchAndScroll(recognizedWordsNorm) {
+    const searchStart = Math.max(0, currentIndex - 5);
+    const searchRange = 250;
+    const maxStart = Math.min(scriptWordsMeta.length - 1, searchStart + searchRange);
+    let best = { score: -1, pos: currentIndex };
+    for (let start = searchStart; start <= maxStart; start++) {
+      let score = 0;
+      for (let i = 0; i < recognizedWordsNorm.length; i++) {
+        const idx = start + i;
+        if (idx >= scriptWordsMeta.length) break;
+        if (wordsMatch(recognizedWordsNorm[i], scriptWordsMeta[idx].norm)) score++;
+      }
+      if (score > best.score) best = { score, pos: start };
+    }
+    const minScore = Math.max(1, Math.ceil(recognizedWordsNorm.length * 0.34));
+    if (best.score >= minScore) {
+      const newIndex = Math.min(best.pos + recognizedWordsNorm.length - 1, scriptWordsMeta.length - 1);
+      if (newIndex >= currentIndex - 3) {
+        currentIndex = newIndex;
+        setTargetToIndex(currentIndex);
+      }
+    }
+  }
+
+  function handleSpeechResult(event) {
+    const res = event.results[event.results.length - 1];
+    if (!res) return;
+    const text = res[0].transcript || "";
+    const words = text.trim().split(/\s+/).map(normalizeWord).filter(Boolean);
+    const windowWords = words.slice(-10);
+    if (windowWords.length > 0) matchAndScroll(windowWords);
+  }
+
+  function handleSpeechError(event) {
+    console.warn("Speech recognition error:", event && event.error);
+    const now = Date.now();
+    if (now - lastFailureWindowStart > 30000) {
+      lastFailureWindowStart = now;
+      recognitionFailures = 0;
+    }
+    recognitionFailures++;
+    if (recognitionFailures >= 3) {
+      switchToFallback();
+    }
+  }
+
+  function handleSpeechEnd() {
+    if (usingFallback || paused || readScreen.hidden) return;
+    try {
+      recognition.start();
+    } catch (e) {
+      handleSpeechError({ error: "restart-failed" });
+    }
+  }
+
+  // ---- volume fallback mode ----
+  async function switchToFallback() {
+    if (usingFallback) return;
+    usingFallback = true;
+    mode = "volume";
+    if (recognition) {
+      recognition.onend = null;
+      recognition.onerror = null;
+      try { recognition.stop(); } catch (e) { /* already stopped */ }
+      recognition = null;
+    }
+    modeIndicatorEl.textContent = "🔊 Volume (fallback)";
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+      const source = audioCtx.createMediaStreamSource(stream);
+      analyser = audioCtx.createAnalyser();
+      analyser.fftSize = 512;
+      dataArray = new Uint8Array(analyser.fftSize);
+      source.connect(analyser);
+    } catch (e) {
+      console.error("Fallback mic access failed", e);
+      modeIndicatorEl.textContent = "⚠️ Sem microfone disponível";
+    }
+  }
+
+  function updateVolumeLevel() {
+    if (!analyser) return;
+    analyser.getByteTimeDomainData(dataArray);
+    let sumSq = 0;
+    for (let i = 0; i < dataArray.length; i++) {
+      const v = (dataArray[i] - 128) / 128;
+      sumSq += v * v;
+    }
+    const rms = Math.sqrt(sumSq / dataArray.length);
+    const now = performance.now();
+    if (rms > VOLUME_THRESHOLD) lastLoudTime = now;
+    isSpeakingVolume = (now - lastLoudTime) < 400;
+  }
+
+  function fallbackSpeedPxPerSec() {
+    return (state.fontSize * 1.4) * (state.wpm / 140) / 2.3;
+  }
+
+  // ---- main animation loop (smoothing + volume advance) ----
+  function readLoop(timestamp) {
+    if (lastFrameTime === null) lastFrameTime = timestamp;
+    const dt = (timestamp - lastFrameTime) / 1000;
+    lastFrameTime = timestamp;
+
+    if (!paused) {
+      if (mode === "volume") {
+        updateVolumeLevel();
+        if (isSpeakingVolume) targetScrollTop += fallbackSpeedPxPerSec() * dt;
+      }
+      scrollContainerEl.scrollTop += (targetScrollTop - scrollContainerEl.scrollTop) * 0.15;
+    }
+    rafId = requestAnimationFrame(readLoop);
+  }
+
+  // ---- wake lock ----
+  async function requestWakeLock() {
+    try {
+      if ("wakeLock" in navigator) {
+        wakeLockObj = await navigator.wakeLock.request("screen");
+        wakeLockObj.addEventListener("release", () => { wakeLockObj = null; });
+      } else {
+        startVideoFallbackWakeLock();
+      }
+    } catch (e) {
+      startVideoFallbackWakeLock();
+    }
+  }
+
+  function startVideoFallbackWakeLock() {
+    if (videoFallbackEl) return;
+    try {
+      const canvas = document.createElement("canvas");
+      canvas.width = 2; canvas.height = 2;
+      const ctx = canvas.getContext("2d");
+      ctx.fillRect(0, 0, 2, 2);
+      const stream = canvas.captureStream(1);
+      const video = document.createElement("video");
+      video.muted = true;
+      video.playsInline = true;
+      video.loop = true;
+      video.style.position = "fixed";
+      video.style.width = "1px";
+      video.style.height = "1px";
+      video.style.opacity = "0.01";
+      video.srcObject = stream;
+      document.body.appendChild(video);
+      video.play().catch(() => {});
+      videoFallbackEl = video;
+    } catch (e) {
+      console.warn("Video wake-lock fallback failed", e);
+    }
+  }
+
+  function stopVideoFallbackWakeLock() {
+    if (videoFallbackEl) {
+      videoFallbackEl.pause();
+      videoFallbackEl.remove();
+      videoFallbackEl = null;
+    }
+  }
+
+  document.addEventListener("visibilitychange", async () => {
+    if (document.visibilityState === "visible" && !readScreen.hidden && !wakeLockObj && "wakeLock" in navigator) {
+      try { wakeLockObj = await navigator.wakeLock.request("screen"); } catch (e) { /* ignore */ }
+    }
+  });
+
+  // ---------------------------------------------------------------
+  // Enter / exit reading screen
+  // ---------------------------------------------------------------
+  function enterReadScreen() {
+    renderScript(state.scriptText);
+    currentIndex = 0;
+    mode = "speech";
+    usingFallback = false;
+    recognitionFailures = 0;
+    paused = false;
+    lastFrameTime = null;
+    targetScrollTop = 0;
+
+    scriptTextEl.style.fontSize = state.fontSize + "px";
+    scriptTextEl.style.paddingLeft = state.marginPercent + "%";
+    scriptTextEl.style.paddingRight = state.marginPercent + "%";
+    scriptTextEl.classList.toggle("mirrored", state.mirror);
+
+    playPauseBtn.textContent = "⏸";
+    editScreen.hidden = true;
+    readScreen.hidden = false;
+    scrollContainerEl.scrollTop = 0;
+
+    requestWakeLock();
+
+    if (SpeechRecognitionCtor) {
+      startSpeechMode();
+    } else {
+      switchToFallback();
+    }
+
+    if (rafId === null) rafId = requestAnimationFrame(readLoop);
+  }
+
+  function exitReadScreen() {
+    if (recognition) {
+      recognition.onend = null;
+      recognition.onerror = null;
+      try { recognition.stop(); } catch (e) { /* already stopped */ }
+      recognition = null;
+    }
+    if (audioCtx) {
+      try { audioCtx.close(); } catch (e) { /* ignore */ }
+      audioCtx = null;
+      analyser = null;
+    }
+    if (rafId !== null) {
+      cancelAnimationFrame(rafId);
+      rafId = null;
+    }
+    if (wakeLockObj) {
+      wakeLockObj.release().catch(() => {});
+      wakeLockObj = null;
+    }
+    stopVideoFallbackWakeLock();
+
+    readScreen.hidden = true;
+    editScreen.hidden = false;
+    initEditScreen();
+  }
+
+  exitBtn.addEventListener("click", exitReadScreen);
+
+  restartBtn.addEventListener("click", () => {
+    currentIndex = 0;
+    targetScrollTop = 0;
+    scrollContainerEl.scrollTop = 0;
+  });
+
+  playPauseBtn.addEventListener("click", () => {
+    paused = !paused;
+    playPauseBtn.textContent = paused ? "▶" : "⏸";
+    if (mode === "speech" && recognition) {
+      if (paused) {
+        try { recognition.stop(); } catch (e) { /* ignore */ }
+      } else {
+        try { recognition.start(); } catch (e) { /* ignore */ }
+      }
+    }
+  });
+
+  speedMinusBtn.addEventListener("click", () => {
+    state.wpm = Math.max(60, state.wpm - 15);
+    saveState();
+  });
+  speedPlusBtn.addEventListener("click", () => {
+    state.wpm = Math.min(350, state.wpm + 15);
+    saveState();
+  });
+
+  // ---- jump to ----
+  function jumpToText(query) {
+    const qWords = query.trim().split(/\s+/).map(normalizeWord).filter(Boolean);
+    if (qWords.length === 0 || scriptWordsMeta.length === 0) return;
+    let best = { score: -1, pos: 0 };
+    for (let start = 0; start < scriptWordsMeta.length; start++) {
+      let score = 0;
+      for (let i = 0; i < qWords.length; i++) {
+        const idx = start + i;
+        if (idx >= scriptWordsMeta.length) break;
+        if (wordsMatch(qWords[i], scriptWordsMeta[idx].norm)) score++;
+      }
+      if (score > best.score) best = { score, pos: start };
+    }
+    if (best.score > 0) {
+      currentIndex = Math.min(best.pos + qWords.length - 1, scriptWordsMeta.length - 1);
+      scrollToIndexInstant(currentIndex);
+    }
+  }
+
+  jumpBtn.addEventListener("click", () => {
+    jumpInput.value = "";
+    jumpModal.hidden = false;
+  });
+  jumpCancelBtn.addEventListener("click", () => { jumpModal.hidden = true; });
+  jumpGoBtn.addEventListener("click", () => {
+    jumpToText(jumpInput.value);
+    jumpModal.hidden = true;
+  });
+
+  // ---------------------------------------------------------------
+  // Init
+  // ---------------------------------------------------------------
+  loadState();
+  initEditScreen();
+})();
+</script>
+</body>
+</html>
