@@ -234,6 +234,11 @@
     </label>
   </div>
 
+  <div class="control-row">
+    <label>Velocidade de rolagem <span id="wpmValue"></span> ppm</label>
+    <input type="range" id="wpmSlider" min="60" max="350" step="10" value="140">
+  </div>
+
   <div class="preview-wrap">
     <div id="previewText"></div>
   </div>
@@ -320,6 +325,8 @@
   const marginSlider = document.getElementById("marginSlider");
   const marginValue = document.getElementById("marginValue");
   const mirrorToggle = document.getElementById("mirrorToggle");
+  const wpmSlider = document.getElementById("wpmSlider");
+  const wpmValue = document.getElementById("wpmValue");
   const previewText = document.getElementById("previewText");
   const startBtn = document.getElementById("startBtn");
 
@@ -407,6 +414,7 @@
   function applyEditStyles() {
     fontSizeValue.textContent = state.fontSize;
     marginValue.textContent = state.marginPercent;
+    wpmValue.textContent = state.wpm;
     previewText.style.fontSize = state.fontSize + "px";
     previewText.style.paddingLeft = state.marginPercent + "%";
     previewText.style.paddingRight = state.marginPercent + "%";
@@ -420,6 +428,7 @@
     fontSizeSlider.value = state.fontSize;
     marginSlider.value = state.marginPercent;
     mirrorToggle.checked = state.mirror;
+    wpmSlider.value = state.wpm;
     applyEditStyles();
   }
 
@@ -440,6 +449,11 @@
   });
   mirrorToggle.addEventListener("change", () => {
     state.mirror = mirrorToggle.checked;
+    applyEditStyles();
+    saveState();
+  });
+  wpmSlider.addEventListener("input", () => {
+    state.wpm = Number(wpmSlider.value);
     applyEditStyles();
     saveState();
   });
@@ -697,7 +711,7 @@
   }
 
   function fallbackSpeedPxPerSec() {
-    return (state.fontSize * 1.4) * (state.wpm / 140) / 2.3;
+    return (state.fontSize * 1.4) * (state.wpm / 140) / 1.3;
   }
 
   // ---- main animation loop (smoothing + volume advance) ----
