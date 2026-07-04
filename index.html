@@ -565,7 +565,7 @@
     if (!res) return;
     const text = res[0].transcript || "";
     const words = text.trim().split(/\s+/).map(normalizeWord).filter(Boolean);
-    const windowWords = words.slice(-10);
+    const windowWords = words.slice(-6);
     if (windowWords.length > 0) matchAndScroll(windowWords);
   }
 
@@ -646,7 +646,7 @@
         updateVolumeLevel();
         if (isSpeakingVolume) targetScrollTop += fallbackSpeedPxPerSec() * dt;
       }
-      scrollContainerEl.scrollTop += (targetScrollTop - scrollContainerEl.scrollTop) * 0.15;
+      scrollContainerEl.scrollTop += (targetScrollTop - scrollContainerEl.scrollTop) * 0.35;
     }
     rafId = requestAnimationFrame(readLoop);
   }
