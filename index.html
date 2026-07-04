@@ -496,6 +496,10 @@
   let wakeLockObj = null;
   let videoFallbackEl = null;
 
+  let lastResultTime = 0;
+  let watchdogId = null;
+  const WATCHDOG_STALL_MS = 5000;
+
   const SpeechRecognitionCtor = window.SpeechRecognition || window.webkitSpeechRecognition || null;
 
   function computeTargetScrollTopForSpan(span) {
@@ -529,10 +533,36 @@
     recognition.onresult = handleSpeechResult;
     recognition.onerror = handleSpeechError;
     recognition.onend = handleSpeechEnd;
+    lastResultTime = Date.now();
     try {
       recognition.start();
     } catch (e) {
       handleSpeechError({ error: "start-failed" });
+    }
+    startWatchdog();
+  }
+
+  // Chrome's SpeechRecognition sometimes silently stalls (no results, no
+  // error, no onend) after a while. This watchdog force-restarts it if no
+  // result has arrived for WATCHDOG_STALL_MS while we're actively listening.
+  function startWatchdog() {
+    if (watchdogId) return;
+    watchdogId = setInterval(() => {
+      if (mode === "speech" && !usingFallback && !paused && !readScreen.hidden && recognition) {
+        if (Date.now() - lastResultTime > WATCHDOG_STALL_MS) {
+          console.warn("Speech recognition stalled, restarting");
+          lastResultTime = Date.now();
+          // stop() triggers onend, which restarts recognition (see handleSpeechEnd)
+          try { recognition.stop(); } catch (e) { /* ignore */ }
+        }
+      }
+    }, 3000);
+  }
+
+  function stopWatchdog() {
+    if (watchdogId) {
+      clearInterval(watchdogId);
+      watchdogId = null;
     }
   }
 
@@ -563,6 +593,7 @@
   }
 
   function handleSpeechResult(event) {
+    lastResultTime = Date.now();
     const res = event.results[event.results.length - 1];
     if (!res) return;
     const text = res[0].transcript || "";
@@ -598,6 +629,7 @@
     if (usingFallback) return;
     usingFallback = true;
     mode = "volume";
+    stopWatchdog();
     if (recognition) {
       recognition.onend = null;
       recognition.onerror = null;
@@ -741,6 +773,7 @@
   }
 
   function exitReadScreen() {
+    stopWatchdog();
     if (recognition) {
       recognition.onend = null;
       recognition.onerror = null;
