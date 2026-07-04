@@ -720,7 +720,7 @@
     const dt = (timestamp - lastFrameTime) / 1000;
     lastFrameTime = timestamp;
 
-    if (!paused) {
+    if (!paused && !userScrolling) {
       if (mode === "volume") {
         updateVolumeLevel();
         if (isSpeakingVolume) targetScrollTop += fallbackSpeedPxPerSec() * dt;
@@ -729,6 +729,52 @@
     }
     rafId = requestAnimationFrame(readLoop);
   }
+
+  // ---- manual touch scrolling ----
+  // While the user is dragging, let native scrolling take over completely
+  // (don't fight it with the auto-scroll easing). After release, wait a bit
+  // for momentum scrolling to settle, then resume auto-scroll from wherever
+  // the user left it.
+  let userScrolling = false;
+  let userScrollResumeTimer = null;
+
+  function onUserScrollStart() {
+    userScrolling = true;
+    if (userScrollResumeTimer) {
+      clearTimeout(userScrollResumeTimer);
+      userScrollResumeTimer = null;
+    }
+  }
+
+  function onUserScrollEnd() {
+    if (userScrollResumeTimer) clearTimeout(userScrollResumeTimer);
+    userScrollResumeTimer = setTimeout(() => {
+      userScrolling = false;
+      targetScrollTop = scrollContainerEl.scrollTop;
+      syncCurrentIndexToScroll();
+    }, 400);
+  }
+
+  function syncCurrentIndexToScroll() {
+    if (scriptWordsMeta.length === 0) return;
+    const containerRect = scrollContainerEl.getBoundingClientRect();
+    const bandY = containerRect.top + containerRect.height * 0.42;
+    let closestIdx = currentIndex;
+    let closestDist = Infinity;
+    for (let i = 0; i < scriptWordsMeta.length; i++) {
+      const rect = scriptWordsMeta[i].span.getBoundingClientRect();
+      const dist = Math.abs(rect.top - bandY);
+      if (dist < closestDist) {
+        closestDist = dist;
+        closestIdx = i;
+      }
+    }
+    currentIndex = closestIdx;
+  }
+
+  scrollContainerEl.addEventListener("pointerdown", onUserScrollStart);
+  scrollContainerEl.addEventListener("pointerup", onUserScrollEnd);
+  scrollContainerEl.addEventListener("pointercancel", onUserScrollEnd);
 
   // ---- wake lock ----
   async function requestWakeLock() {
@@ -820,6 +866,11 @@
   function exitReadScreen() {
     stopWatchdog();
     stopPeriodicRestart();
+    if (userScrollResumeTimer) {
+      clearTimeout(userScrollResumeTimer);
+      userScrollResumeTimer = null;
+    }
+    userScrolling = false;
     if (recognition) {
       recognition.onend = null;
       recognition.onerror = null;
