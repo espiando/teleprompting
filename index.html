@@ -500,6 +500,9 @@
   let watchdogId = null;
   const WATCHDOG_STALL_MS = 5000;
 
+  let periodicRestartId = null;
+  const PERIODIC_RESTART_MS = 7000;
+
   const SpeechRecognitionCtor = window.SpeechRecognition || window.webkitSpeechRecognition || null;
 
   function computeTargetScrollTopForSpan(span) {
@@ -540,6 +543,7 @@
       handleSpeechError({ error: "start-failed" });
     }
     startWatchdog();
+    startPeriodicRestart();
   }
 
   // Chrome's SpeechRecognition sometimes silently stalls (no results, no
@@ -557,6 +561,32 @@
         }
       }
     }, 3000);
+  }
+
+  // Proactively tears down and recreates the recognition instance on a fixed
+  // cadence, before it has a chance to silently degrade/stall on its own.
+  // Reading position is untouched (it lives in currentIndex/targetScrollTop,
+  // not in the recognition object), so this is just a brief ~0.3-1s gap in
+  // recognition, not a reset.
+  function startPeriodicRestart() {
+    if (periodicRestartId) return;
+    periodicRestartId = setInterval(() => {
+      if (mode === "speech" && !usingFallback && !paused && !readScreen.hidden && recognition) {
+        const current = recognition;
+        current.onend = null;
+        current.onerror = null;
+        try { current.stop(); } catch (e) { /* ignore */ }
+        recognition = null;
+        startSpeechMode();
+      }
+    }, PERIODIC_RESTART_MS);
+  }
+
+  function stopPeriodicRestart() {
+    if (periodicRestartId) {
+      clearInterval(periodicRestartId);
+      periodicRestartId = null;
+    }
   }
 
   function stopWatchdog() {
@@ -630,6 +660,7 @@
     usingFallback = true;
     mode = "volume";
     stopWatchdog();
+    stopPeriodicRestart();
     if (recognition) {
       recognition.onend = null;
       recognition.onerror = null;
@@ -774,6 +805,7 @@
 
   function exitReadScreen() {
     stopWatchdog();
+    stopPeriodicRestart();
     if (recognition) {
       recognition.onend = null;
       recognition.onerror = null;
