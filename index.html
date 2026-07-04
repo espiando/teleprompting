@@ -667,7 +667,7 @@
       try { recognition.stop(); } catch (e) { /* already stopped */ }
       recognition = null;
     }
-    modeIndicatorEl.textContent = "🔊 Volume (fallback)";
+    modeIndicatorEl.textContent = "🔊 Volume";
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       audioCtx = new (window.AudioContext || window.webkitAudioContext)();
@@ -794,11 +794,11 @@
 
     requestWakeLock();
 
-    if (SpeechRecognitionCtor) {
-      startSpeechMode();
-    } else {
-      switchToFallback();
-    }
+    // Volume-based scrolling is the primary mode: it's local and instant,
+    // with no cloud round-trip or stall risk. Speech-tracking code stays in
+    // place (switchToFallback's counterpart, startSpeechMode) but isn't
+    // used automatically for now.
+    switchToFallback();
 
     if (rafId === null) rafId = requestAnimationFrame(readLoop);
   }
